@@ -2,12 +2,10 @@
 ## @brief: This file contains the implementation of the i_IFP_learn algorithm.
 
 ## Import necessary libraries
-import os
+
 import math
-import umap
 import random
 import numpy as np
-import seaborn as sns
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
@@ -19,9 +17,9 @@ from scipy import stats
 from scipy.stats import kstest,f_oneway,norm,f,multinomial
 from scipy.stats import kruskal
 import json
-import warnings
-warnings.filterwarnings("ignore", category=RuntimeWarning)
-np.seterr(divide='ignore', invalid='ignore')
+# import os
+# import umap
+# import seaborn as sns
 
 # =========================
 # Basic methods
@@ -289,15 +287,15 @@ def calculate_anova(X, labels):
         p_values.append(pv)
     return F_stats,p_values
 
-def multiple_random_sampling(X, true_labels, K,component, prev_influential_indices, num_trials):
+def multiple_random_sampling(X,K,component, prev_influential_indices, method='laplacian',num_trials=200):
     """
-    Perform multiple random sampling for KMeans clustering.
+    Perform multiple random sampling for dimensionality reduction.
     Args:
         X (np.ndarray): Input data.
-        true_labels (np.ndarray): True labels for the data.
         K (int): Number of clusters.
         component (int): Number of components for spectral embedding.
         prev_influential_indices (list): Indices of influential features.
+        method (str): Method for dimensionality reduction ('laplacian' or 'PCA').
         num_trials (int): Number of trials for random sampling.
     Returns:
         list: List of results from each trial.
@@ -306,39 +304,59 @@ def multiple_random_sampling(X, true_labels, K,component, prev_influential_indic
     n, p = X.shape
     scaler = StandardScaler()
     Z = scaler.fit_transform(X)/np.sqrt(X.shape[0])*np.sqrt((X.shape[0]-1))
-    kmeans = KMeans(n_clusters=K,n_init=30)
+    kmeans = KMeans(n_clusters=K,n_init=30,random_state=46)
 
     for i in range(num_trials):
         random_indices = random.sample(range(p), len(prev_influential_indices))
         random_features = Z[:, random_indices]
+
+        if method == 'laplacian':
+            cosine_dist = cosine_distances(random_features)
+            gamma = 1  
+            affinity_matrix = np.exp(-gamma * cosine_dist ** 2)
+            
+            embedding = SpectralEmbedding(
+                n_components=component,
+                affinity='precomputed',
+                n_neighbors=8
+            )
+            X_random = embedding.fit_transform(affinity_matrix)
+        elif method == 'PCA':
+            eigenvalues, eigenvectors = np.linalg.eigh(np.dot(random_features, random_features.T))
+            X_random = eigenvectors[:, np.argsort(eigenvalues)[::-1][:component]]
         
-        cosine_dist = cosine_distances(random_features)
-        gamma = 1  
-        affinity_matrix = np.exp(-gamma * cosine_dist ** 2)
-        
-        embedding = SpectralEmbedding(
-            n_components=component,
-            affinity='precomputed',
-            n_neighbors=8
-        )
-        X_random = embedding.fit_transform(affinity_matrix)
-        
-        # kmeans = KMeans(n_clusters=K, n_init=30, random_state=46)
+
         labels_random = kmeans.fit_predict(X_random)
         
-        error = 1 - calculate_accuracy(labels_random, true_labels)
         f_random, _ = calculate_anova(X, labels_random)
         f_random = np.array(f_random)
         random_f_data = f_random[random_indices]
         
-        results.append({
-            'random_indices': random_indices,
-            'error': error,
-            'random_f_data': random_f_data
-        })
-        
-        # print(f"Iteration {i+1}: error = {error}")
+        results.append({'random_f_data': random_f_data})
     return results
+
+def quantile_transform_iqr(f_data, df1, df2):
+    """
+    Perform quantile transformation using the IQR method.
+    Args:
+        f_data (np.ndarray): Input data.
+        df1 (int): Degrees of freedom 1.
+        df2 (int): Degrees of freedom 2.
+    Returns:
+        np.ndarray: Transformed data.
+    """
+
+    Q1_r = np.percentile(f_data, 25)
+    Q2_r = np.percentile(f_data, 50)
+    Q3_r = np.percentile(f_data, 75)
+    
+    Q1_s = stats.f.ppf(0.25, df1, df2)
+    Q2_s = stats.f.ppf(0.50, df1, df2)
+    Q3_s = stats.f.ppf(0.75, df1, df2)
+    
+    f_adj = (f_data - Q2_r) / (Q3_r - Q1_r) * (Q3_s - Q1_s) + Q2_s
+    
+    return f_adj
 
 # =========================
 # Non-parametric methods
@@ -399,56 +417,52 @@ def calculate_kruskal_anova(X, labels):
 
     return H_stats, p_values
 
-def multiple_random_sampling_kw(X, true_labels, K, component, prev_influential_indices,num_trials):
+def multiple_random_sampling_kw(X,K,component, prev_influential_indices, method='laplacian',num_trials=200):
     """
-    Perform multiple random sampling for Kruskal-Wallis test.
+    Perform multiple random sampling (non-parameter version) for dimensionality reduction.
     Args:
         X (np.ndarray): Input data.
-        true_labels (np.ndarray): True labels for the data.
         K (int): Number of clusters.
-        component (int): Number of components for spectral embedding
-        kmeans (KMeans): KMeans object for clustering.
+        component (int): Number of components for spectral embedding.
         prev_influential_indices (list): Indices of influential features.
+        method (str): Method for dimensionality reduction ('laplacian' or 'PCA').
         num_trials (int): Number of trials for random sampling.
     Returns:
         list: List of results from each trial.
     """
     results = []
     n, p = X.shape
-    component = K + 2
     scaler = StandardScaler()
     Z = scaler.fit_transform(X)/np.sqrt(X.shape[0])*np.sqrt((X.shape[0]-1))
-    kmeans = KMeans(n_clusters=K,n_init=30)
-    
+    kmeans = KMeans(n_clusters=K,n_init=30,random_state=46)
+
     for i in range(num_trials):
         random_indices = random.sample(range(p), len(prev_influential_indices))
         random_features = Z[:, random_indices]
+
+        if method == 'laplacian':
+            cosine_dist = cosine_distances(random_features)
+            gamma = 1  
+            affinity_matrix = np.exp(-gamma * cosine_dist ** 2)
+            
+            embedding = SpectralEmbedding(
+                n_components=component,
+                affinity='precomputed',
+                n_neighbors=8
+            )
+            X_random = embedding.fit_transform(affinity_matrix)
+        elif method == 'PCA':
+            eigenvalues, eigenvectors = np.linalg.eigh(np.dot(random_features, random_features.T))
+            X_random = eigenvectors[:, np.argsort(eigenvalues)[::-1][:component]]
         
-        cosine_dist = cosine_distances(random_features)
-        gamma = 1  
-        affinity_matrix = np.exp(-gamma * cosine_dist ** 2)
-        
-        embedding = SpectralEmbedding(
-            n_components=component,
-            affinity='precomputed',
-            n_neighbors=8
-        )
-        X_random = embedding.fit_transform(affinity_matrix)
-        
+
         labels_random = kmeans.fit_predict(X_random)
         
-        error = 1 - calculate_accuracy(labels_random, true_labels)
         f_random, _ = calculate_kruskal_anova(X, labels_random)
         f_random = np.array(f_random)
         random_f_data = f_random[random_indices]
         
-        results.append({
-            'random_indices': random_indices,
-            'error': error,
-            'random_h_data': random_f_data
-        })
-        
-        # print(f"Iteration {i+1}: error = {error}")
+        results.append({'random_f_data': random_f_data})
     return results
 
 
@@ -464,7 +478,6 @@ def compute_values(scores):
     Returns:
         tuple: b, c, ScoreMaximum, weights.
     """
-    
     scores = np.array(scores) 
     two_thirds = int(len(scores) * 2 / 3)
     top_scores = scores[-two_thirds:]
@@ -478,7 +491,7 @@ def compute_values(scores):
     
     return b, c, ScoreMaximum, weights
 
-def i_if_learn(X,labels,K,prev_influential_indices,constant,ksp,method,component,random_results,max_iter=10,convergence_threshold = 0.10):
+def i_if_learn(X,K,labels,prev_influential_indices,ksp,random_results,component,threshold_method='hct',method='laplacian',max_iter=10,convergence_threshold = 0.10):
     """
     Perform the i_if_learn algorithm on the input data.
     Args:
@@ -486,14 +499,14 @@ def i_if_learn(X,labels,K,prev_influential_indices,constant,ksp,method,component
         labels (np.ndarray): Labels given by initialization method (IF-PCA).
         K (int): Number of clusters for KMeans.
         prev_influential_indices (list): Indices of influential features from initialization (IF-PCA).
-        constant (str | float): Controls the feature selection strategy. Three types of values are supported:
-            - 'hct': Uses the HCT method to determine the threshold adaptively to select top features.
-            - float > 1: Interpreted as a percentage. For example, `constant=10` selects the top 10% of features with the lowest p-values.
-            - float <= 1: Uses a sparsity-based theoretical threshold given by `-constant * sqrt(log(p))`, selects features with p-values below this threshold.
         ksp (float): adjusted p-value for KS test.
-        method (str): Method for dimensionality reduction ('laplacian', 'UMAP', or 'PCA').
         component (int): Number of components for spectral embedding.
         random_results (list): Results from multiple random sampling.
+        threshold_method (str | float): Controls the feature selection strategy. By default it is 'hct'. Three types of values are supported:
+            - 'hct': Uses the HCT method to determine the threshold adaptively to select top features.
+            - float > 1: Interpreted as a percentage. For example, `threshold_method=10` selects the top 10% of features with the lowest p-values.
+            - float <= 1: Uses a sparsity-based theoretical threshold given by `-constant * sqrt(log(p))`, selects features with p-values below this threshold.
+        method (str): Method for dimensionality reduction ('laplacian' or 'PCA'), by default it is 'laplacian'.
         max_iter (int, optional): Maximum number of iterations. Default is 10.
         convergence_threshold (float, optional): Convergence threshold. Default is 0.10.
     Returns:
@@ -515,9 +528,7 @@ def i_if_learn(X,labels,K,prev_influential_indices,constant,ksp,method,component
         f_data=replace_inf_with_extremes(f_data)
         f_data=np.array(f_data)
 
-        mean_theoretical = stats.f.mean(dfn=df1, dfd=df2)
-        std_theoretical = stats.f.std(dfn=df1, dfd=df2)
-        f_adj=(f_data-np.mean(f_data))/np.std(f_data)*std_theoretical+mean_theoretical
+        f_adj = quantile_transform_iqr(f_data, df1, df2)
         fp = 1 - stats.f.cdf(f_adj, df1, df2)
 
         influential_f_data = f_data[prev_influential_indices]
@@ -548,21 +559,21 @@ def i_if_learn(X,labels,K,prev_influential_indices,constant,ksp,method,component
         z_scores=S/(w**2+(1-w)**2)
         
 
-        if(constant=='hct'):
+        if(threshold_method=='hct'):
             pi=norm.cdf(z_scores)
             threshold = calculate_hct_threshold(pi,n,p)
             current_influential_indices = np.argsort(z_scores)[:threshold] 
             influential_features = Z[:, current_influential_indices]
 
-        elif(constant>1):
-            percent = constant/100  
+        elif(threshold_method>1):
+            percent = threshold_method/100  
             num_features = p
             threshold = int(num_features * percent)
             current_influential_indices = np.argsort(z_scores)[:threshold] 
             influential_features = Z[:, current_influential_indices]
 
         else:
-            threshold = -constant*np.sqrt(np.log(p))
+            threshold = -threshold_method*np.sqrt(np.log(p))
             influential_features = Z[:, z_scores<= threshold]
             current_influential_indices = np.where(z_scores<= threshold)[0]
 
@@ -577,29 +588,19 @@ def i_if_learn(X,labels,K,prev_influential_indices,constant,ksp,method,component
             )
             X_low = embedding.fit_transform(affinity_matrix)
 
-        elif(method=='UMAP'):
-            eigenvalues, eigenvectors = np.linalg.eigh(np.dot(influential_features,influential_features.T))
-            V = eigenvectors[:, np.argsort(eigenvalues)[::-1][:component]] 
-            umap_model = umap.UMAP(n_neighbors=5,n_components=component, metric='cosine',angular_rp_forest=True,init=np.array(V)) 
-            X_low = umap_model.fit_transform(influential_features)
-
-        else:
+        elif(method=='PCA'):
             eigenvalues, eigenvectors = np.linalg.eigh(np.dot(influential_features,influential_features.T))
             X_low = eigenvectors[:, np.argsort(eigenvalues)[::-1][:component]]
 
-        clusters = kmeans.fit_predict(X_low)
-        labels = clusters
-        # accuracy = calculate_accuracy(labels, true_labels)
-        # error=1-accuracy
-        # print("error rate", error)
+        labels = kmeans.fit_predict(X_low)
 
         if prev_influential_indices is not None:
             changed_features = np.setdiff1d(current_influential_indices, prev_influential_indices)
             feature_change_ratio = len(changed_features) / len(prev_influential_indices)
-            print(f"Feature change ratio: {feature_change_ratio * 100:.2f}%")
+            # print(f"Feature change ratio: {feature_change_ratio * 100:.2f}%")
 
             if feature_change_ratio < convergence_threshold:
-                print(f"Converged after {iteration + 1} iterations with feature change ratio {feature_change_ratio * 100:.2f}%")
+                # print(f"Converged after {iteration + 1} iterations with feature change ratio {feature_change_ratio * 100:.2f}%")
                 break
 
         prev_influential_indices = current_influential_indices

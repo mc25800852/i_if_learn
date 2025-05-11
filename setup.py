@@ -1,17 +1,15 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='i-if-learn',  # 包名不建议用大写或下划线
+    name='i-if-learn', 
     version='0.1.0',
-    packages=find_packages(),  # 自动查找含 __init__.py 的目录
+    packages=find_packages(), 
     install_requires=[
         'numpy',
         'scipy',
         'pandas',
         'scikit-learn',
         'matplotlib',
-        'seaborn',
-        'umap-learn',
     ],
     author='MC',
     author_email='12112941@mail.sustech.edu.cn',
