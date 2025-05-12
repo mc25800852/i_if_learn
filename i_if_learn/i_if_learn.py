@@ -252,7 +252,7 @@ def if_pca(X,K,threshold=None):
 
     V = eigenvectors[:, np.argsort(eigenvalues)[::-1][:K-1]]
 
-    kmeans = KMeans(n_clusters=K,n_init=30)
+    kmeans = KMeans(n_clusters=K,n_init=30,random_state=42)
 
     clusters = kmeans.fit_predict(V)
 
@@ -304,7 +304,7 @@ def multiple_random_sampling(X,K,component, prev_influential_indices, method='la
     n, p = X.shape
     scaler = StandardScaler()
     Z = scaler.fit_transform(X)/np.sqrt(X.shape[0])*np.sqrt((X.shape[0]-1))
-    kmeans = KMeans(n_clusters=K,n_init=30,random_state=46)
+    kmeans = KMeans(n_clusters=K,n_init=30,random_state=42)
 
     for i in range(num_trials):
         random_indices = random.sample(range(p), len(prev_influential_indices))
@@ -520,7 +520,7 @@ def i_if_learn(X,K,labels,prev_influential_indices,ksp,random_results,component,
     df1=K-1
     df2=n-K
 
-    kmeans = KMeans(n_clusters=K,n_init=30)
+    kmeans = KMeans(n_clusters=K,n_init=30,random_state=42)
     for iteration in range(max_iter):
         print(f".............Iteration {iteration + 1}/{max_iter}...............")
 
