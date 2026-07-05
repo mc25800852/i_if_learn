@@ -75,12 +75,12 @@ If the input data is not normally distributed or contains outliers, a non-parame
 ```python
 from i_IF_learn import *
 
-clusters, prev_influential_indices, ks_data, pi = if_pca(X, K)
+clusters, prev_influential_indices, ks_data, ksp = if_pca(X, K)
 
 component=K+2
 
 random_results=multiple_random_sampling(X,K,component, prev_influential_indices)
 
-final_indluential_indices, final_labels = i_if_learn(X,K,labels,prev_influential_indices,ksp,random_results,component):
+final_indluential_indices, final_labels = i_if_learn(X,K,labels,prev_influential_indices,ksp,random_results,component)
 ```
 
